@@ -10,14 +10,19 @@ on:
   repository_dispatch:
   workflow_dispatch:
     inputs:
-      ssh:
-        description: 'SSH connection to Actions'
+      debug:
+        description: '启用调试信息输出'
         required: false
         default: 'false'
+        type: boolean
       kernel_version:
         description: 'OpenWrt kernel version (main/openwrt-23.05)'
         required: false
         default: 'main'
+        type: choice
+        options:
+          - main
+          - openwrt-23.05
   schedule:
     - cron: '0 2 * * 3'  # 每周三凌晨2点自动构建
 
@@ -99,12 +104,27 @@ jobs:
         cd openwrt
         $GITHUB_WORKSPACE/$CUSTOMIZE_FIRMWARE_SH
 
-    - name: SSH连接到Actions
-      uses: P3TERX/ssh2actions@v1.0.0
-      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
-      env:
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+    - name: 调试信息输出
+      if: github.event.inputs.debug == 'true'
+      run: |
+        echo "=== 调试信息 ==="
+        echo "构建环境信息:"
+        echo "- 操作系统: $(lsb_release -d | cut -f2)"
+        echo "- 内核版本: $(uname -r)"
+        echo "- CPU信息: $(nproc) 核心"
+        echo "- 内存信息: $(free -h | grep Mem)"
+        echo "- 磁盘空间: $(df -h /)"
+        echo ""
+        echo "Git信息:"
+        echo "- 提交哈希: $GITHUB_SHA"
+        echo "- 分支: $GITHUB_REF_NAME"
+        echo "- 仓库: $GITHUB_REPOSITORY"
+        echo ""
+        echo "环境变量:"
+        echo "- REPO_URL: $REPO_URL"
+        echo "- REPO_BRANCH: $REPO_BRANCH"
+        echo "- DEVICE_NAME: $DEVICE_NAME"
+        echo "==============="
 
     - name: 下载编译依赖
       id: package
@@ -120,13 +140,43 @@ jobs:
       run: |
         cd openwrt
         echo -e "使用 $(nproc) 线程编译"
-        make -j$(nproc) || make -j1 || make -j1 V=s
+        
+        # 编译前调试信息
+        if [ "${{ github.event.inputs.debug }}" == "true" ]; then
+          echo "=== 编译前检查 ==="
+          echo "配置文件检查:"
+          [ -f .config ] && echo "✅ .config 存在" || echo "❌ .config 不存在"
+          echo "依赖下载状态:"
+          ls -la dl/ | head -10
+          echo "==============="
+        fi
+        
+        # 编译固件，并在失败时输出详细信息
+        if ! make -j$(nproc); then
+          echo "⚠️  多线程编译失败，尝试单线程编译..."
+          if ! make -j1; then
+            echo "❌ 单线程编译失败，启用详细日志..."
+            make -j1 V=s
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+        fi
         
         # 设置输出变量
         echo "status=success" >> $GITHUB_OUTPUT
         echo "DEVICE_NAME=_$DEVICE_NAME" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
         echo "BUILD_DATE=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_ENV
+        
+        # 编译成功后的调试信息
+        if [ "${{ github.event.inputs.debug }}" == "true" ]; then
+          echo "=== 编译成功信息 ==="
+          echo "生成的文件:"
+          find bin/targets -name "*.img*" -o -name "*.bin" | head -5
+          echo "磁盘使用情况:"
+          df -h
+          echo "==============="
+        fi
 
     - name: 生成双格式固件
       if: steps.compile.outputs.status == 'success'
@@ -259,11 +309,52 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: 构建失败报告
+      if: failure() && steps.compile.outputs.status == 'failed'
+      run: |
+        echo "=== 构建失败诊断信息 ==="
+        echo "时间: $(date)"
+        echo "分支: $REPO_BRANCH"
+        echo "设备: $DEVICE_NAME"
+        echo ""
+        echo "系统资源使用情况:"
+        df -h
+        free -h
+        echo ""
+        echo "最后10行编译日志:"
+        if [ -f openwrt/build.log ]; then
+          tail -10 openwrt/build.log
+        else
+          echo "未找到编译日志文件"
+        fi
+        echo "========================="
+
+    - name: 上传构建日志
+      if: failure() && steps.compile.outputs.status == 'failed'
+      uses: actions/upload-artifact@v4
+      with:
+        name: Build-Logs-${{ env.BUILD_DATE }}
+        path: |
+          openwrt/logs/
+          openwrt/.config
+        retention-days: 3
+        if-no-files-found: ignore
+
     - name: 构建完成通知
       if: always()
       run: |
         if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
           echo "✅ 构建成功！固件已发布到Release"
-        else
+          echo "生成的固件文件:"
+          if [ -n "$FIRMWARE" ] && [ -d "$FIRMWARE" ]; then
+            ls -la "$FIRMWARE"/*.img* "$FIRMWARE"/*.burn* 2>/dev/null || echo "未找到固件文件"
+          fi
+        elif [ "${{ steps.compile.outputs.status }}" == "failed" ]; then
           echo "❌ 构建失败，请检查构建日志"
+          echo "调试建议:"
+          echo "1. 检查上传的构建日志 Artifacts"
+          echo "2. 启用调试模式重新构建"
+          echo "3. 检查配置文件是否正确"
+        else
+          echo "⚠️  构建状态未知，请检查工作流日志"
         fi
