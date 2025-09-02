@@ -1,0 +1,269 @@
+#
+# Pure OpenWrt Auto Build for OneCloud
+# Description: Build clean OpenWrt firmware using GitHub Actions  
+# Target: Thunder OneCloud (玩客云)
+#
+
+name: Pure OpenWrt Builder for OneCloud
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      ssh:
+        description: 'SSH connection to Actions'
+        required: false
+        default: 'false'
+      kernel_version:
+        description: 'OpenWrt kernel version (main/openwrt-23.05)'
+        required: false
+        default: 'main'
+  schedule:
+    - cron: '0 2 * * 3'  # 每周三凌晨2点自动构建
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt
+  REPO_BRANCH: ${{ github.event.inputs.kernel_version || 'main' }}
+  FEEDS_CONF: configs/feeds.conf.default
+  CONFIG_FILE: configs/onecloud.config
+  CUSTOMIZE_FEEDS_SH: scripts/customize-feeds.sh
+  CUSTOMIZE_FIRMWARE_SH: scripts/customize-firmware.sh
+  GENERATE_IMAGES_SH: scripts/generate-images.sh
+  SETUP_ENV_SH: scripts/setup-environment.sh
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  DEVICE_NAME: OneCloud
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    if: github.event.repository.owner.id == github.event.sender.id || ! github.event.sender.id
+
+    steps:
+    - name: 检出代码库
+      uses: actions/checkout@v4
+
+    - name: 初始化构建环境
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        # 设置时区
+        sudo timedatectl set-timezone "$TZ"
+        
+        # 执行环境准备脚本
+        chmod +x $SETUP_ENV_SH
+        $GITHUB_WORKSPACE/$SETUP_ENV_SH
+        
+        # 创建工作目录
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
+
+    - name: 克隆OpenWrt源码
+      working-directory: /workdir
+      run: |
+        echo "构建信息:"
+        echo "- 仓库: $REPO_URL"
+        echo "- 分支: $REPO_BRANCH"
+        echo "- 设备: $DEVICE_NAME"
+        
+        df -hT $PWD
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        cd openwrt
+        echo "OPENWRT_VERSION=$(git describe --tags --always)" >> $GITHUB_ENV
+
+    - name: 自定义Feeds源
+      run: |
+        [ -e $FEEDS_CONF ] && cp $FEEDS_CONF openwrt/feeds.conf.default
+        chmod +x $CUSTOMIZE_FEEDS_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$CUSTOMIZE_FEEDS_SH
+
+    - name: 更新Feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: 自定义固件配置
+      run: |
+        # 复制自定义文件
+        [ -d files ] && cp -r files openwrt/
+        
+        # 应用设备配置
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
+        
+        # 执行固件定制脚本
+        chmod +x $CUSTOMIZE_FIRMWARE_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$CUSTOMIZE_FIRMWARE_SH
+
+    - name: SSH连接到Actions
+      uses: P3TERX/ssh2actions@v1.0.0
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
+      env:
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+    - name: 下载编译依赖
+      id: package
+      run: |
+        cd openwrt
+        make defconfig
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: 编译固件
+      id: compile
+      run: |
+        cd openwrt
+        echo -e "使用 $(nproc) 线程编译"
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        
+        # 设置输出变量
+        echo "status=success" >> $GITHUB_OUTPUT
+        echo "DEVICE_NAME=_$DEVICE_NAME" >> $GITHUB_ENV
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        echo "BUILD_DATE=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_ENV
+
+    - name: 生成双格式固件
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        chmod +x $GENERATE_IMAGES_SH
+        chmod +x tools/AmlImg
+        $GITHUB_WORKSPACE/$GENERATE_IMAGES_SH
+
+    - name: 检查磁盘使用情况
+      if: (!cancelled())
+      run: df -hT
+
+    - name: 整理固件文件
+      id: organize
+      if: steps.compile.outputs.status == 'success' && !cancelled()
+      run: |
+        cd openwrt/bin/targets/*/*
+        
+        # 清理不需要的文件
+        rm -rf packages feeds.buildinfo version.buildinfo profiles.json *.sha *.manifest
+        
+        # 重命名固件文件
+        for file in *.img*; do
+          if [ -f "$file" ]; then
+            new_name="openwrt-onecloud-${BUILD_DATE}-$(basename "$file")"
+            mv "$file" "$new_name"
+          fi
+        done
+        
+        # 生成校验文件
+        for file in *.img* *.burn*; do
+          if [ -f "$file" ]; then
+            sha256sum "$file" > "${file}.sha256"
+          fi
+        done
+        
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
+        
+        # 显示生成的文件
+        echo "生成的固件文件:"
+        ls -la *.img* *.burn* 2>/dev/null || echo "未找到固件文件"
+
+    - name: 上传固件到Artifacts
+      uses: actions/upload-artifact@v4
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      with:
+        name: OpenWrt_OneCloud_${{ env.BUILD_DATE }}
+        path: ${{ env.FIRMWARE }}
+        retention-days: 7
+
+    - name: 生成Release标签
+      id: tag
+      if: env.UPLOAD_RELEASE == 'true' && steps.organize.outputs.status == 'success' && !cancelled()
+      run: |
+        release_tag="${{ env.BUILD_DATE }}"
+        echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
+        
+        # 生成Release说明
+        cat > release.txt << EOF
+        # 玩客云纯净版OpenWrt固件 - $release_tag
+        
+        ## 固件信息
+        - **构建时间**: $(date +'%Y-%m-%d %H:%M:%S')
+        - **OpenWrt版本**: ${{ env.OPENWRT_VERSION }}
+        - **内核版本**: ${{ env.REPO_BRANCH }}
+        - **目标设备**: 玩客云 (OneCloud)
+        - **默认IP**: 192.168.8.88
+        - **用户名**: root
+        - **密码**: password
+        
+        ## 固件特性
+        ✅ 使用OpenWrt官方最新内核
+        ✅ Nginx替代uhttpd作为Web服务器
+        ✅ Argon主题作为默认UI
+        ✅ 保留核心路由功能 (NAT、防火墙、DHCP)
+        ✅ 包含LuCI Web管理界面
+        ✅ CPU频率管理 (玩客云专用)
+        ✅ Docker容器支持
+        ✅ SSH远程管理
+        ✅ 基础网络工具 (curl, wget, htop)
+        
+        ## 安装说明
+        
+        ### 线刷固件 (.burn.img.xz)
+        1. 下载并解压 .burn.img.xz 文件
+        2. 使用 [Amlogic USB Burning Tool](https://androidmtk.com/download-amlogic-usb-burning-tool) 烧录
+        3. 设备进入烧录模式后连接USB线进行烧录
+        
+        ### 卡刷固件 (.img.xz)
+        1. 下载并解压 .img.xz 文件到TF卡
+        2. 使用dd命令或Etcher写入TF卡
+        3. 将TF卡插入设备并启动
+        
+        ## 注意事项
+        - 首次启动需要约5分钟，红灯闪烁为启动中，蓝灯常亮表示启动完成
+        - 建议首次登录后修改默认密码
+        - 所有固件文件均提供SHA256校验值
+        EOF
+        
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 发布固件到Release
+      uses: softprops/action-gh-release@v1
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        name: OpenWrt OneCloud Pure - ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: ${{ env.FIRMWARE }}/*
+        draft: false
+        prerelease: false
+
+    - name: 清理工作流运行记录
+      uses: Mattraks/delete-workflow-runs@v2
+      with:
+        token: ${{ github.token }}
+        repository: ${{ github.repository }}
+        retain_days: 7
+        keep_minimum_runs: 3
+
+    - name: 删除旧的Releases
+      uses: dev-drprasad/delete-older-releases@v0.3.2
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      with:
+        keep_latest: 5
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 构建完成通知
+      if: always()
+      run: |
+        if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
+          echo "✅ 构建成功！固件已发布到Release"
+        else
+          echo "❌ 构建失败，请检查构建日志"
+        fi

@@ -1,0 +1,31 @@
+#!/bin/sh
+# 玩客云纯净版OpenWrt启动脚本
+
+# 设置LED状态 - 启动中为红灯闪烁
+echo heartbeat > /sys/class/leds/onecloud:red:alive/trigger
+
+# 优化网络参数
+echo 1 > /proc/sys/net/ipv4/ip_forward
+echo 1 > /proc/sys/net/ipv4/conf/all/route_localnet
+
+# 设置BBR拥塞控制
+echo 'bbr' > /proc/sys/net/ipv4/tcp_congestion_control
+echo 'fq' > /proc/sys/net/core/default_qdisc
+
+# 优化内存管理
+echo 1 > /proc/sys/vm/overcommit_memory
+echo 50 > /proc/sys/vm/vfs_cache_pressure
+echo 10 > /proc/sys/vm/swappiness
+
+# CPU频率管理
+if [ -f /sys/devices/system/cpu/cpufreq/policy0/scaling_governor ]; then
+    echo performance > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
+fi
+
+# 启动完成后设置LED为蓝灯常亮
+sleep 5
+echo none > /sys/class/leds/onecloud:red:alive/trigger
+echo 0 > /sys/class/leds/onecloud:red:alive/brightness
+echo 1 > /sys/class/leds/onecloud:blue:alive/brightness
+
+exit 0
