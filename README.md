@@ -2,10 +2,6 @@
 
 🚀 **基于OpenWrt官方最新内核的纯净固件，仅包含核心功能和必要组件**
 
-[![Pure OpenWrt Builder](https://github.com/your-username/onecloud-openwrt-pure/actions/workflows/build-openwrt.yml/badge.svg)](https://github.com/your-username/onecloud-openwrt-pure/actions/workflows/build-openwrt.yml)
-[![Release](https://img.shields.io/github/v/release/your-username/onecloud-openwrt-pure)](https://github.com/your-username/onecloud-openwrt-pure/releases)
-[![Downloads](https://img.shields.io/github/downloads/your-username/onecloud-openwrt-pure/total)](https://github.com/your-username/onecloud-openwrt-pure/releases)
-
 ## ✨ 固件特性
 
 ### 🎯 纯净性
