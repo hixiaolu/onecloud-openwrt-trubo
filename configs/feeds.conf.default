@@ -1,12 +1,10 @@
-#
-# 纯净OpenWrt Feed源配置
-# 仅使用官方源，不添加第三方源
-#
+# Pure OpenWrt Feed sources configuration
+# Only official feeds, no third-party sources
 
 src-git packages https://git.openwrt.org/feed/packages.git
 src-git luci https://git.openwrt.org/project/luci.git
 src-git routing https://git.openwrt.org/feed/routing.git
 src-git telephony https://git.openwrt.org/feed/telephony.git
 
-# Argon主题 - 唯一允许的第三方组件
+# Argon theme - the only allowed third-party component
 src-git argon https://github.com/jerrykuku/luci-theme-argon.git

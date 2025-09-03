@@ -1,36 +1,39 @@
 #!/bin/bash
 #
-# 环境准备脚本 (绝对最小版)
-# 只安装OpenWrt编译的核心必需包
+# Environment setup script (absolute minimal version)
+# Install only core required packages for OpenWrt compilation
 #
 
 set -e
 
-echo "=== 开始最小化环境准备 ==="
+echo "=== Starting Minimal Environment Setup ==="
 
-# 显示初始状态
-echo "初始磁盘状态:"
+# Show initial status
+echo "Initial disk status:"
 df -h
 
-# 不进行任何清理，避免耗时
-echo "跳过清理操作，直接安装依赖..."
+# Skip cleanup operations to save time
+echo "Skipping cleanup operations, installing dependencies directly..."
 
-# 更新软件源（静默）
-echo "更新软件源..."
+# Update software sources (quiet)
+echo "Updating software sources..."
 sudo apt-get -qq update
 
-# 只安装绝对必需的包
-echo "安装绝对必需的依赖..."
+# Install only absolutely necessary packages
+echo "Installing absolutely necessary dependencies..."
 sudo apt-get -qq install -y \
-  build-essential git wget \
-  python3 gawk gettext \
-  libncurses5-dev zlib1g-dev
+  build-essential clang flex bison g++ gawk \
+  gcc-multilib g++-multilib \
+  git wget curl time file unzip rsync swig \
+  libncurses5-dev libssl-dev zlib1g-dev \
+  python3 python3-dev python3-distutils python3-setuptools \
+  gettext xsltproc
 
-# 最小ccache设置
-echo "设置ccache..."
-ccache -M 2G 2>/dev/null || echo "ccache设置可选，跳过"
-ccache -z 2>/dev/null || echo "ccache清零可选，跳过"
+# Minimal ccache setup
+echo "Setting up ccache..."
+ccache -M 4G 2>/dev/null || echo "ccache setup optional, skipping"
+ccache -z 2>/dev/null || echo "ccache zeroing optional, skipping"
 
-echo "=== 最小化环境准备完成 ==="
-echo "最终磁盘状态:"
+echo "=== Minimal Environment Setup Completed ==="
+echo "Final disk status:"
 df -h
