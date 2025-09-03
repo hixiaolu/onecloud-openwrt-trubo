@@ -52,7 +52,7 @@ jobs:
     - name: 初始化构建环境
       env:
         DEBIAN_FRONTEND: noninteractive
-      timeout-minutes: 15  # 减少超时时间到15分钟
+      timeout-minutes: 10  # 进一步减少超时时间到10分钟
       run: |
         # 设置时区
         sudo timedatectl set-timezone "$TZ"
@@ -63,12 +63,17 @@ jobs:
         echo "- CPU核心: $(nproc)"
         echo "- 内存: $(free -h | grep Mem | awk '{print $2}')"
         
-        # 执行环境准备脚本（加强错误处理）
+        # 执行环境准备脚本（超强错误处理）
         chmod +x $SETUP_ENV_SH
-        if ! timeout 12m $GITHUB_WORKSPACE/$SETUP_ENV_SH; then
-          echo "⚠️ 环境准备失败，查看详细错误信息"
+        echo "开始执行环境准备脚本..."
+        if ! timeout 8m $GITHUB_WORKSPACE/$SETUP_ENV_SH; then
+          echo "❌ 环境准备失败，查看详细错误信息"
+          echo "磁盘使用情况:"
           df -h
+          echo "内存使用情况:"
           free -h
+          echo "最近的系统日志:"
+          sudo journalctl --no-pager -n 20 || true
           exit 1
         fi
         
