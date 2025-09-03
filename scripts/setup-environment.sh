@@ -19,15 +19,33 @@ echo "Skipping cleanup operations, installing dependencies directly..."
 echo "Updating software sources..."
 sudo apt-get -qq update
 
-# Install only absolutely necessary packages
+# Install only absolutely necessary packages with better error handling
 echo "Installing absolutely necessary dependencies..."
-sudo apt-get -qq install -y \
-  build-essential clang flex bison g++ gawk \
-  gcc-multilib g++-multilib \
-  git wget curl time file unzip rsync swig \
-  libncurses5-dev libssl-dev zlib1g-dev \
-  python3 python3-dev python3-distutils python3-setuptools \
-  gettext xsltproc
+MAX_RETRIES=3
+RETRY_COUNT=0
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if sudo apt-get -qq install -y \
+        build-essential clang flex bison g++ gawk \
+        gcc-multilib g++-multilib \
+        git wget curl time file unzip rsync swig \
+        libncurses5-dev libssl-dev zlib1g-dev \
+        python3 python3-dev python3-distutils python3-setuptools \
+        gettext xsltproc; then
+        echo "Dependencies installed successfully"
+        break
+    else
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        echo "Installation failed, retrying... ($RETRY_COUNT/$MAX_RETRIES)"
+        sleep 5
+        sudo apt-get -qq update
+    fi
+done
+
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    echo "Failed to install dependencies after $MAX_RETRIES attempts"
+    exit 1
+fi
 
 # Minimal ccache setup
 echo "Setting up ccache..."

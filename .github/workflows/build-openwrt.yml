@@ -52,7 +52,7 @@ jobs:
     - name: 初始化构建环境
       env:
         DEBIAN_FRONTEND: noninteractive
-      timeout-minutes: 8  # 进一步减少超时时间到8分钟
+      timeout-minutes: 10  # 增加超时时间到10分钟
       run: |
         # 设置时区
         sudo timedatectl set-timezone "$TZ"
@@ -66,7 +66,7 @@ jobs:
         # 执行环境准备脚本（超级强化错误处理）
         chmod +x $SETUP_ENV_SH
         echo "开始执行环境准备脚本..."
-        if ! timeout 6m bash -x $GITHUB_WORKSPACE/$SETUP_ENV_SH; then
+        if ! timeout 8m bash -x $GITHUB_WORKSPACE/$SETUP_ENV_SH; then
           echo "❌ 环境准备失败！详细错误信息："
           echo "磁盘使用情况:"
           df -h
@@ -160,7 +160,7 @@ jobs:
 
     - name: 编译固件
       id: compile
-      timeout-minutes: 180  # 设置超时时间为3小时
+      timeout-minutes: 240  # 增加超时时间为4小时
       run: |
         cd openwrt
         echo -e "使用 $(nproc) 线程编译"

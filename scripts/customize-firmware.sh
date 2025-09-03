@@ -50,14 +50,14 @@ if [ -d "feeds/argon" ]; then
     echo "# CONFIG_PACKAGE_luci-theme-openwrt-2020 is not set" >> .config
 fi
 
-# Remove unnecessary packages
+# Remove unnecessary packages with better error handling
 echo "Removing unnecessary packages..."
 rm -rf feeds/packages/net/alist 2>/dev/null || true
 rm -rf feeds/packages/net/passwall* 2>/dev/null || true
 rm -rf feeds/packages/net/ssr-plus 2>/dev/null || true
 rm -rf package/alist 2>/dev/null || true
 
-# Remove other unnecessary components
+# Remove other unnecessary components with better error handling
 find . -name "*passwall*" -type d -exec rm -rf {} + 2>/dev/null || true
 find . -name "*ssr-plus*" -type d -exec rm -rf {} + 2>/dev/null || true
 find . -name "*openclash*" -type d -exec rm -rf {} + 2>/dev/null || true
@@ -93,5 +93,10 @@ net.core.netdev_max_backlog = 5000
 vm.swappiness = 10
 vm.vfs_cache_pressure = 50
 EOF
+
+# Ensure proper permissions on config files
+chmod 644 package/base-files/files/etc/sysctl.conf 2>/dev/null || true
+chmod 644 package/base-files/files/etc/shadow 2>/dev/null || true
+chmod 644 package/base-files/files/etc/passwd 2>/dev/null || true
 
 echo "=== Firmware Customization Completed ==="
