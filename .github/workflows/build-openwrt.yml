@@ -52,18 +52,31 @@ jobs:
     - name: 初始化构建环境
       env:
         DEBIAN_FRONTEND: noninteractive
-      timeout-minutes: 30  # 设置超时时间为30分钟
+      timeout-minutes: 15  # 减少超时时间到15分钟
       run: |
         # 设置时区
         sudo timedatectl set-timezone "$TZ"
         
-        # 执行环境准备脚本
+        # 显示环境信息
+        echo "构建环境信息:"
+        echo "- 操作系统: $(lsb_release -d | cut -f2)"
+        echo "- CPU核心: $(nproc)"
+        echo "- 内存: $(free -h | grep Mem | awk '{print $2}')"
+        
+        # 执行环境准备脚本（加强错误处理）
         chmod +x $SETUP_ENV_SH
-        timeout 25m $GITHUB_WORKSPACE/$SETUP_ENV_SH
+        if ! timeout 12m $GITHUB_WORKSPACE/$SETUP_ENV_SH; then
+          echo "⚠️ 环境准备失败，查看详细错误信息"
+          df -h
+          free -h
+          exit 1
+        fi
         
         # 创建工作目录
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
+        
+        echo "✅ 环境初始化完成"
 
     - name: 克隆OpenWrt源码
       working-directory: /workdir
