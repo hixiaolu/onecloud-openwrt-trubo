@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# 环境准备脚本
+# 环境准备脚本 (优化版)
 # 用于安装编译依赖和优化构建环境
 #
 
@@ -8,37 +8,54 @@ set -e
 
 echo "=== 开始环境准备 ==="
 
-# 释放磁盘空间
-echo "正在清理磁盘空间..."
-sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-sudo docker image prune --all --force
-sudo apt-get -qq purge azure-cli ghc* zulu* hhvm llvm* firefox google* dotnet* powershell openjdk* adoptopenjdk* mysql* php* mongodb* moby* snapd* || true
-sudo apt-get -qq autoremove --purge
-sudo apt-get -qq autoclean
+# 显示初始磁盘状态
+echo "初始磁盘状态:"
+df -h
 
-# 更新软件源
+# 释放磁盘空间 (优化版)
+echo "正在清理磁盘空间..."
+sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+sudo docker image prune --all --force 2>/dev/null || true
+
+# 快速清理不必要的软件包
+echo "快速清理不必要软件..."
+sudo apt-get -qq purge -y azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mysql* php* snapd* 2>/dev/null || true
+sudo apt-get -qq autoremove --purge -y 2>/dev/null || true
+sudo apt-get -qq autoclean 2>/dev/null || true
+
+# 更新软件源 (使用更快的镜像源)
 echo "正在更新软件源..."
 sudo sed -i 's/azure\.//' /etc/apt/sources.list
 sudo apt-get -qq update
 
-# 安装编译依赖
+# 分批安装依赖，避免超时
 echo "正在安装编译依赖..."
+echo "步骤1/3: 安装基础构建工具..."
 sudo apt-get -qq install -y \
-  ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 \
-  ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib \
-  g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev \
-  libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev \
-  libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs \
-  msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools \
-  python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo \
-  uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev img2simg
+  build-essential ccache git curl wget unzip \
+  python3 python3-setuptools python3-dev \
+  autoconf automake libtool pkg-config cmake ninja-build
+
+echo "步骤2/3: 安装OpenWrt编译依赖..."
+sudo apt-get -qq install -y \
+  gawk gettext libncurses5-dev libncursesw5-dev \
+  zlib1g-dev libssl-dev bison flex rsync \
+  subversion device-tree-compiler
+
+echo "步骤3/3: 安装附加工具..."
+sudo apt-get -qq install -y \
+  img2simg squashfs-tools qemu-utils \
+  upx-ucl p7zip-full xxd vim
 
 # 设置ccache
 echo "配置ccache..."
 export PATH="/usr/lib/ccache:$PATH"
-ccache -M 50G
+ccache -M 10G
 ccache -z
 
+# 显示清理后的磁盘状态
 echo "=== 环境准备完成 ==="
-echo "磁盘使用情况:"
+echo "最终磁盘使用情况:"
 df -h
+echo "可用内存:"
+free -h

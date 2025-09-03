@@ -52,13 +52,14 @@ jobs:
     - name: 初始化构建环境
       env:
         DEBIAN_FRONTEND: noninteractive
+      timeout-minutes: 30  # 设置超时时间为30分钟
       run: |
         # 设置时区
         sudo timedatectl set-timezone "$TZ"
         
         # 执行环境准备脚本
         chmod +x $SETUP_ENV_SH
-        $GITHUB_WORKSPACE/$SETUP_ENV_SH
+        timeout 25m $GITHUB_WORKSPACE/$SETUP_ENV_SH
         
         # 创建工作目录
         sudo mkdir -p /workdir
@@ -137,6 +138,7 @@ jobs:
 
     - name: 编译固件
       id: compile
+      timeout-minutes: 180  # 设置超时时间为3小时
       run: |
         cd openwrt
         echo -e "使用 $(nproc) 线程编译"
@@ -327,6 +329,23 @@ jobs:
         else
           echo "未找到编译日志文件"
         fi
+        
+        # 检查常见错误
+        echo ""
+        echo "检查常见错误:"
+        if [ -f openwrt/.config ]; then
+          echo "✅ 配置文件存在"
+        else
+          echo "❌ 配置文件不存在"
+        fi
+        
+        if [ -d openwrt/dl ] && [ "$(ls -A openwrt/dl)" ]; then
+          echo "✅ 依赖包下载正常"
+          echo "   下载文件数量: $(find openwrt/dl -type f | wc -l)"
+        else
+          echo "❌ 依赖包下载异常"
+        fi
+        
         echo "========================="
 
     - name: 上传构建日志
