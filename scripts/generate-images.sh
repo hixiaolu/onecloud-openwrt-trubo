@@ -26,19 +26,41 @@ if [ ! -f "$TOOLS_DIR/uboot.img" ]; then
     exit 1
 fi
 
-# Find compiled image file
-IMG_PATH=$(find openwrt/bin/targets -name "*.img.gz" -type f | head -n 1)
-if [ -z "$IMG_PATH" ]; then
-    echo "Error: Compiled .img.gz file not found"
-    find openwrt/bin/targets -name "*.img*" -type f
-    exit 1
-fi
+# Enhanced check for compiled image file with better error handling
+echo "Searching for compiled image file..."
+IMG_PATH=""
+MAX_SEARCH_ATTEMPTS=3
+SEARCH_ATTEMPT=0
+
+while [ $SEARCH_ATTEMPT -lt $MAX_SEARCH_ATTEMPTS ]; do
+    IMG_PATH=$(find openwrt/bin/targets -name "*.img.gz" -type f | head -n 1)
+    if [ -n "$IMG_PATH" ]; then
+        echo "Found image file: $IMG_PATH"
+        break
+    else
+        SEARCH_ATTEMPT=$((SEARCH_ATTEMPT + 1))
+        echo "Image file not found, attempt $SEARCH_ATTEMPT/$MAX_SEARCH_ATTEMPTS"
+        if [ $SEARCH_ATTEMPT -eq $MAX_SEARCH_ATTEMPTS ]; then
+            echo "Error: Compiled .img.gz file not found after $MAX_SEARCH_ATTEMPTS attempts"
+            echo "Available files in bin/targets:"
+            find openwrt/bin/targets -type f | head -20 || echo "No files found"
+            exit 1
+        fi
+        sleep 5
+    fi
+done
 
 echo "Found image file: $IMG_PATH"
 
-# Unzip image file
+# Enhanced unzip with error handling
 echo "Unzipping image file..."
-gzip -dk "$IMG_PATH"
+if ! gzip -dk "$IMG_PATH"; then
+    echo "Error: Failed to unzip image file"
+    echo "File information:"
+    ls -lh "$IMG_PATH" 2>/dev/null || echo "File not found"
+    exit 1
+fi
+
 IMG_FILE="${IMG_PATH%.gz}"
 
 # Check unzipped file
@@ -50,26 +72,34 @@ fi
 echo "Unzipped image file: $IMG_FILE"
 echo "File size: $(ls -lh "$IMG_FILE" | awk '{print $5}')"
 
-# Prepare working directory
+# Prepare working directory with better error handling
 BURN_DIR="$WORK_DIR/burn_temp"
-rm -rf "$BURN_DIR"
+echo "Cleaning up previous temporary files..."
+rm -rf "$BURN_DIR" 2>/dev/null || true
 mkdir -p "$BURN_DIR"
 
 echo "=== Generating Line Flash Firmware ==="
 
-# Unpack uboot.img
+# Enhanced unpack uboot.img with error handling
 echo "Unpacking uboot.img..."
-"$TOOLS_DIR/AmlImg" unpack "$TOOLS_DIR/uboot.img" "$BURN_DIR/"
+if ! "$TOOLS_DIR/AmlImg" unpack "$TOOLS_DIR/uboot.img" "$BURN_DIR/"; then
+    echo "Error: Failed to unpack uboot.img"
+    echo "Tool information:"
+    ls -lh "$TOOLS_DIR/AmlImg" 2>/dev/null || echo "Tool not found"
+    exit 1
+fi
 
 # Set loop device with better error handling
 echo "Setting loop device..."
-MAX_RETRIES=3
+MAX_RETRIES=5
 RETRY_COUNT=0
 
 # Clean up any existing loop devices
+echo "Cleaning up existing loop devices..."
 sudo losetup --reset 2>/dev/null || true
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    LOOP_DEV=""
     LOOP_DEV=$(sudo losetup --find --show --partscan "$IMG_FILE" 2>/dev/null) || LOOP_DEV=""
     if [ -n "$LOOP_DEV" ] && [ -b "$LOOP_DEV" ]; then
         echo "Successfully set loop device: $LOOP_DEV"
@@ -77,29 +107,62 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     else
         RETRY_COUNT=$((RETRY_COUNT + 1))
         echo "Failed to set loop device, retrying... ($RETRY_COUNT/$MAX_RETRIES)"
-        sleep 2
+        if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+            echo "Error: Unable to set loop device after $MAX_RETRIES attempts"
+            # Output diagnostic information
+            echo "Disk space:"
+            df -h
+            echo "Image file information:"
+            ls -la "$IMG_FILE" 2>/dev/null || echo "Image file not found"
+            echo "Loop devices status:"
+            losetup -a 2>/dev/null || echo "Cannot get loop device status"
+            exit 1
+        fi
+        sleep 3
         sudo losetup --reset 2>/dev/null || true
     fi
 done
 
-if [ $RETRY_COUNT -eq $MAX_RETRIES ] || [ -z "$LOOP_DEV" ] || [ ! -b "$LOOP_DEV" ]; then
-    echo "Error: Unable to set loop device after $MAX_RETRIES attempts"
-    # Output diagnostic information
-    df -h
-    ls -la "$IMG_FILE" 2>/dev/null || echo "Image file not found"
-    exit 1
-fi
-
 echo "Using loop device: $LOOP_DEV"
 
-# Cleanup function
+# Enhanced cleanup function with better error handling
 cleanup() {
     echo "Cleaning up resources..."
-    sudo umount "$WORK_DIR/boot_mnt" 2>/dev/null || true
-    sudo umount "$WORK_DIR/root_mnt" 2>/dev/null || true
-    sudo losetup -d "$LOOP_DEV" 2>/dev/null || true
-    rm -rf "$WORK_DIR/boot_mnt" "$WORK_DIR/root_mnt"
-    rm -f "$WORK_DIR/boot_temp.img"
+    sync 2>/dev/null || true
+    sleep 2
+    
+    # More robust unmounting
+    if mountpoint -q "$WORK_DIR/boot_mnt" 2>/dev/null; then
+        echo "Unmounting boot_mnt..."
+        sudo umount "$WORK_DIR/boot_mnt" 2>/dev/null || {
+            echo "Warning: Failed to unmount boot_mnt"
+            sudo umount -f "$WORK_DIR/boot_mnt" 2>/dev/null || true
+        }
+    fi
+    
+    if mountpoint -q "$WORK_DIR/root_mnt" 2>/dev/null; then
+        echo "Unmounting root_mnt..."
+        sudo umount "$WORK_DIR/root_mnt" 2>/dev/null || {
+            echo "Warning: Failed to unmount root_mnt"
+            sudo umount -f "$WORK_DIR/root_mnt" 2>/dev/null || true
+        }
+    fi
+    
+    # Detach loop device with retries
+    if [ -n "$LOOP_DEV" ] && [ -b "$LOOP_DEV" ]; then
+        echo "Detaching loop device..."
+        sudo losetup -d "$LOOP_DEV" 2>/dev/null || {
+            echo "Warning: Failed to detach loop device, trying again..."
+            sleep 2
+            sudo losetup -d "$LOOP_DEV" 2>/dev/null || {
+                echo "Warning: Failed to detach loop device after retry"
+            }
+        }
+    fi
+    
+    # Clean up directories
+    rm -rf "$WORK_DIR/boot_mnt" "$WORK_DIR/root_mnt" 2>/dev/null || true
+    rm -f "$WORK_DIR/boot_temp.img" 2>/dev/null || true
 }
 
 # Set cleanup on exit
@@ -107,11 +170,11 @@ trap cleanup EXIT
 
 # Wait for partition devices to appear with better handling
 echo "Waiting for partition devices to appear..."
-sleep 3
+sleep 5
 
 # Check partitions with better error handling
 PARTITION_CHECK_COUNT=0
-MAX_PARTITION_CHECKS=5
+MAX_PARTITION_CHECKS=10
 
 while [ $PARTITION_CHECK_COUNT -lt $MAX_PARTITION_CHECKS ]; do
     if [ -e "${LOOP_DEV}p1" ] && [ -e "${LOOP_DEV}p2" ]; then
@@ -121,12 +184,15 @@ while [ $PARTITION_CHECK_COUNT -lt $MAX_PARTITION_CHECKS ]; do
         PARTITION_CHECK_COUNT=$((PARTITION_CHECK_COUNT + 1))
         echo "Waiting for partitions to appear... ($PARTITION_CHECK_COUNT/$MAX_PARTITION_CHECKS)"
         sudo partprobe "$LOOP_DEV" 2>/dev/null || true
-        sleep 2
+        sleep 3
     fi
 done
 
 if [ ! -e "${LOOP_DEV}p1" ] || [ ! -e "${LOOP_DEV}p2" ]; then
     echo "Error: Partition devices do not exist after $MAX_PARTITION_CHECKS attempts"
+    echo "Available block devices:"
+    lsblk 2>/dev/null || echo "Cannot list block devices"
+    echo "FDISK output:"
     sudo fdisk -l "$LOOP_DEV" 2>/dev/null || true
     exit 1
 fi
@@ -143,101 +209,168 @@ if ! mkfs.ext4 -F "$WORK_DIR/boot_temp.img" >/dev/null 2>&1; then
     exit 1
 fi
 
-# Create mount points
-mkdir -p "$WORK_DIR/boot_mnt" "$WORK_DIR/root_mnt"
+# Create mount points with error handling
+echo "Creating mount points..."
+mkdir -p "$WORK_DIR/boot_mnt" "$WORK_DIR/root_mnt" || {
+    echo "Error: Failed to create mount points"
+    exit 1
+}
 
 # Mount filesystems with better error handling
 echo "Mounting filesystems..."
 if ! sudo mount "$WORK_DIR/boot_temp.img" "$WORK_DIR/boot_mnt" 2>/dev/null; then
     echo "Error: Failed to mount boot image"
+    echo "Mount information:"
+    mount | grep "$WORK_DIR/boot_temp.img" || echo "Not mounted"
     exit 1
 fi
 
 if ! sudo mount "${LOOP_DEV}p2" "$WORK_DIR/root_mnt" 2>/dev/null; then
     echo "Error: Failed to mount rootfs partition"
+    echo "Mount information:"
+    mount | grep "${LOOP_DEV}p2" || echo "Not mounted"
     exit 1
 fi
 
-# Copy files with better error handling
+# Copy files with better error handling and progress indication
 echo "Copying rootfs contents to boot image..."
-if ! sudo cp -rp "$WORK_DIR/root_mnt"/* "$WORK_DIR/boot_mnt/" 2>/dev/null; then
-    echo "Warning: Some files may not have been copied successfully"
+COPY_START_TIME=$(date +%s)
+if ! sudo rsync -a "$WORK_DIR/root_mnt"/ "$WORK_DIR/boot_mnt/" 2>/dev/null; then
+    echo "Warning: rsync failed, trying cp command..."
+    if ! sudo cp -rp "$WORK_DIR/root_mnt"/* "$WORK_DIR/boot_mnt/" 2>/dev/null; then
+        echo "Error: Failed to copy files to boot image"
+        exit 1
+    fi
 fi
+COPY_END_TIME=$(date +%s)
+COPY_DURATION=$((COPY_END_TIME - COPY_START_TIME))
+echo "File copy completed in $COPY_DURATION seconds"
 
 if ! sudo sync; then
     echo "Warning: Sync command failed"
 fi
 
 # Unmount filesystems
-sudo umount "$WORK_DIR/boot_mnt"
-sudo umount "$WORK_DIR/root_mnt"
+echo "Unmounting filesystems..."
+sudo umount "$WORK_DIR/boot_mnt" || {
+    echo "Warning: Failed to unmount boot_mnt"
+}
+sudo umount "$WORK_DIR/root_mnt" || {
+    echo "Warning: Failed to unmount root_mnt"
+}
 
 # Generate sparse images with better error handling
 echo "Generating sparse images..."
 if ! sudo img2simg "${LOOP_DEV}p1" "$BURN_DIR/boot.simg" 2>/dev/null; then
     echo "Error: Failed to generate boot sparse image"
+    echo "Checking source file:"
+    ls -la "${LOOP_DEV}p1" 2>/dev/null || echo "Source file not found"
     exit 1
 fi
 
 if ! sudo img2simg "$WORK_DIR/boot_temp.img" "$BURN_DIR/rootfs.simg" 2>/dev/null; then
     echo "Error: Failed to generate rootfs sparse image"
+    echo "Checking source file:"
+    ls -la "$WORK_DIR/boot_temp.img" 2>/dev/null || echo "Source file not found"
     exit 1
 fi
 
 # Generate command file
+echo "Generating command file..."
 cat > "$BURN_DIR/commands.txt" << EOF
 PARTITION:boot:sparse:boot.simg
 PARTITION:rootfs:sparse:rootfs.simg
 EOF
 
-# Pack burn image
+# Pack burn image with better error handling
 BURN_IMG_NAME="openwrt-onecloud-${BUILD_DATE}.burn.img"
 echo "Generating line flash image: $BURN_IMG_NAME"
 if ! "$TOOLS_DIR/AmlImg" pack "$BURN_IMG_NAME" "$BURN_DIR/" 2>/dev/null; then
     echo "Error: Failed to pack burn image"
+    echo "Checking working directory:"
+    ls -la "$BURN_DIR/" 2>/dev/null || echo "Directory not found"
     exit 1
 fi
 
-# Move to firmware directory
+# Move to firmware directory with error handling
 FIRMWARE_DIR=$(dirname "$IMG_FILE")
-mv "$BURN_IMG_NAME" "$FIRMWARE_DIR/"
+if [ -f "$BURN_IMG_NAME" ]; then
+    if ! mv "$BURN_IMG_NAME" "$FIRMWARE_DIR/"; then
+        echo "Error: Failed to move burn image to firmware directory"
+        exit 1
+    fi
+else
+    echo "Error: Burn image file not found"
+    exit 1
+fi
 
 echo "=== Generating Card Flash Firmware ==="
 
-# Rename card flash image
+# Rename card flash image with error handling
 CARD_IMG_NAME="openwrt-onecloud-${BUILD_DATE}.img"
-mv "$IMG_FILE" "$FIRMWARE_DIR/$CARD_IMG_NAME"
+if [ -f "$IMG_FILE" ]; then
+    if ! mv "$IMG_FILE" "$FIRMWARE_DIR/$CARD_IMG_NAME"; then
+        echo "Error: Failed to rename card flash image"
+        exit 1
+    fi
+else
+    echo "Error: Original image file not found"
+    exit 1
+fi
 
 echo "=== Compressing Firmware Files ==="
 
 # Enter firmware directory
-cd "$FIRMWARE_DIR"
+cd "$FIRMWARE_DIR" || {
+    echo "Error: Failed to enter firmware directory"
+    exit 1
+}
 
-# Generate checksum files and compress
+# Generate checksum files and compress with better error handling
 echo "Generating checksum files..."
-sha256sum "$BURN_IMG_NAME" > "${BURN_IMG_NAME}.sha256"
-sha256sum "$CARD_IMG_NAME" > "${CARD_IMG_NAME}.sha256"
+if ! sha256sum "$BURN_IMG_NAME" > "${BURN_IMG_NAME}.sha256" 2>/dev/null; then
+    echo "Error: Failed to generate checksum for burn image"
+    exit 1
+fi
+
+if ! sha256sum "$CARD_IMG_NAME" > "${CARD_IMG_NAME}.sha256" 2>/dev/null; then
+    echo "Error: Failed to generate checksum for card image"
+    exit 1
+fi
 
 echo "Compressing firmware files..."
-if ! xz -9 --threads=0 "$BURN_IMG_NAME" 2>/dev/null; then
-    echo "Warning: Failed to compress burn image, trying single thread"
-    if ! xz -9 "$BURN_IMG_NAME" 2>/dev/null; then
+# Enhanced compression with better error handling
+if command -v pxz >/dev/null 2>&1; then
+    COMPRESS_CMD="pxz"
+elif command -v xz >/dev/null 2>&1; then
+    COMPRESS_CMD="xz"
+else
+    echo "Error: No compression tool found"
+    exit 1
+fi
+
+# Compress burn image
+if ! $COMPRESS_CMD -9 --threads=0 "$BURN_IMG_NAME" 2>/dev/null; then
+    echo "Warning: Failed to compress burn image with parallel compression, trying single thread"
+    if ! $COMPRESS_CMD -9 "$BURN_IMG_NAME" 2>/dev/null; then
         echo "Error: Failed to compress burn image"
         exit 1
     fi
 fi
 
-if ! xz -9 --threads=0 "$CARD_IMG_NAME" 2>/dev/null; then
-    echo "Warning: Failed to compress card image, trying single thread"
-    if ! xz -9 "$CARD_IMG_NAME" 2>/dev/null; then
+# Compress card image
+if ! $COMPRESS_CMD -9 --threads=0 "$CARD_IMG_NAME" 2>/dev/null; then
+    echo "Warning: Failed to compress card image with parallel compression, trying single thread"
+    if ! $COMPRESS_CMD -9 "$CARD_IMG_NAME" 2>/dev/null; then
         echo "Error: Failed to compress card image"
         exit 1
     fi
 fi
 
 # Clean up temporary files
-rm -rf "$BURN_DIR"
-rm -f "$WORK_DIR/boot_temp.img"
+echo "Cleaning up temporary files..."
+rm -rf "$BURN_DIR" 2>/dev/null || true
+rm -f "$WORK_DIR/boot_temp.img" 2>/dev/null || true
 
 echo "=== Image Generation Completed ==="
 echo "Generated files:"

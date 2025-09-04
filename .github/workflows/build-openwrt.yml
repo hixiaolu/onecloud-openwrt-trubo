@@ -52,7 +52,7 @@ jobs:
     - name: 初始化构建环境
       env:
         DEBIAN_FRONTEND: noninteractive
-      timeout-minutes: 15  # 增加超时时间到15分钟
+      timeout-minutes: 20  # 增加超时时间到20分钟
       run: |
         # 设置时区
         sudo timedatectl set-timezone "$TZ"
@@ -70,18 +70,18 @@ jobs:
         # 执行环境准备脚本（超级强化错误处理）
         chmod +x $SETUP_ENV_SH
         echo "开始执行环境准备脚本..."
-        if ! timeout 10m bash -x $GITHUB_WORKSPACE/$SETUP_ENV_SH; then
+        if ! timeout 15m bash -x $GITHUB_WORKSPACE/$SETUP_ENV_SH; then
           echo "❌ 环境准备失败！详细错误信息："
           echo "磁盘使用情况:"
           df -h
           echo "内存使用情况:"
           free -h
           echo "进程列表:"
-          ps aux | head -10
+          ps aux | head -20
           echo "最近的系统日志:"
-          sudo journalctl --no-pager -n 30 2>/dev/null || echo "无法获取系统日志"
+          sudo journalctl --no-pager -n 50 2>/dev/null || echo "无法获取系统日志"
           echo "网络状态:"
-          ping -c 3 8.8.8.8 || echo "网络连接可能有问题"
+          ping -c 5 8.8.8.8 || echo "网络连接可能有问题"
           exit 1
         fi
         
@@ -100,6 +100,15 @@ jobs:
         echo "- 设备: $DEVICE_NAME"
         
         df -hT $PWD
+        
+        # 检查磁盘空间是否足够（至少15GB）
+        AVAILABLE_SPACE_KB=$(df . | awk 'NR==2 {print $4}')
+        AVAILABLE_SPACE_GB=$((AVAILABLE_SPACE_KB / 1024 / 1024))
+        if [ $AVAILABLE_SPACE_GB -lt 15 ]; then
+            echo "⚠️  磁盘空间不足: ${AVAILABLE_SPACE_GB}GB available, 至少需要15GB"
+            exit 1
+        fi
+        
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
         cd openwrt
@@ -164,7 +173,7 @@ jobs:
 
     - name: 编译固件
       id: compile
-      timeout-minutes: 300  # 增加超时时间为5小时
+      timeout-minutes: 360  # 增加超时时间为6小时
       run: |
         cd openwrt
         echo -e "使用 $(nproc) 线程编译"
@@ -187,15 +196,33 @@ jobs:
         fi
         
         # 编译固件，并在失败时输出详细信息
-        if ! make -j$(nproc); then
-          echo "⚠️  多线程编译失败，尝试单线程编译..."
-          if ! make -j1; then
-            echo "❌ 单线程编译失败，启用详细日志..."
-            make -j1 V=s
-            echo "status=failed" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+        echo "开始编译固件..."
+        COMPILE_START_TIME=$(date +%s)
+        
+        # 使用详细输出模式进行编译，便于调试
+        if ! make -j$(nproc) V=s 2>&1 | tee build.log; then
+          echo "❌ 编译失败，启用详细日志..."
+          echo "status=failed" >> $GITHUB_OUTPUT
+          
+          # 输出最后100行日志
+          echo "=== 最后100行编译日志 ==="
+          tail -100 build.log || echo "无法读取日志文件"
+          echo "========================"
+          
+          # 输出资源使用情况
+          echo "=== 资源使用情况 ==="
+          echo "磁盘使用情况:"
+          df -h
+          echo "内存使用情况:"
+          free -h
+          echo "=================="
+          
+          exit 1
         fi
+        
+        COMPILE_END_TIME=$(date +%s)
+        COMPILE_DURATION=$((COMPILE_END_TIME - COMPILE_START_TIME))
+        echo "✅ 编译完成，耗时: $((COMPILE_DURATION / 60)) 分钟 $((COMPILE_DURATION % 60)) 秒"
         
         # 设置输出变量
         echo "status=success" >> $GITHUB_OUTPUT
@@ -207,7 +234,7 @@ jobs:
         if [ "${{ github.event.inputs.debug }}" == "true" ]; then
           echo "=== 编译成功信息 ==="
           echo "生成的文件:"
-          find bin/targets -name "*.img*" -o -name "*.bin" | head -5
+          find bin/targets -name "*.img*" -o -name "*.bin" | head -10
           echo "磁盘使用情况:"
           df -h
           echo "==============="
@@ -222,7 +249,13 @@ jobs:
 
     - name: 检查磁盘使用情况
       if: (!cancelled())
-      run: df -hT
+      run: |
+        echo "=== 磁盘使用情况 ==="
+        df -hT
+        echo "=== 内存使用情况 ==="
+        free -h
+        echo "=== CPU使用情况 ==="
+        top -bn1 | head -20
 
     - name: 整理固件文件
       id: organize
@@ -387,7 +420,7 @@ jobs:
       with:
         name: Build-Logs-${{ env.BUILD_DATE }}
         path: |
-          openwrt/logs/
+          openwrt/build.log
           openwrt/.config
         retention-days: 3
         if-no-files-found: ignore

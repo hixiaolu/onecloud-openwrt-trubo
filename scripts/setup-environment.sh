@@ -12,26 +12,56 @@ echo "=== Starting Minimal Environment Setup ==="
 echo "Initial disk status:"
 df -h
 
-# Check network connectivity
+# Enhanced network connectivity check with multiple attempts
 echo "Checking network connectivity..."
-if ! ping -c 3 8.8.8.8 >/dev/null 2>&1; then
-    echo "Network connection failed"
-    exit 1
-fi
+MAX_PING_ATTEMPTS=5
+PING_ATTEMPT=0
+while [ $PING_ATTEMPT -lt $MAX_PING_ATTEMPTS ]; do
+    if ping -c 3 8.8.8.8 >/dev/null 2>&1; then
+        echo "Network connectivity verified"
+        break
+    else
+        PING_ATTEMPT=$((PING_ATTEMPT + 1))
+        echo "Network check failed, attempt $PING_ATTEMPT/$MAX_PING_ATTEMPTS"
+        if [ $PING_ATTEMPT -eq $MAX_PING_ATTEMPTS ]; then
+            echo "Network connectivity failed after $MAX_PING_ATTEMPTS attempts"
+            exit 1
+        fi
+        sleep 5
+    fi
+done
 
 # Skip cleanup operations to save time
 echo "Skipping cleanup operations, installing dependencies directly..."
 
-# Update software sources (quiet)
+# Update software sources with retry mechanism
 echo "Updating software sources..."
-sudo apt-get -qq update
+MAX_UPDATE_ATTEMPTS=3
+UPDATE_ATTEMPT=0
+while [ $UPDATE_ATTEMPT -lt $MAX_UPDATE_ATTEMPTS ]; do
+    if sudo apt-get -qq update; then
+        echo "Software sources updated successfully"
+        break
+    else
+        UPDATE_ATTEMPT=$((UPDATE_ATTEMPT + 1))
+        echo "Software sources update failed, attempt $UPDATE_ATTEMPT/$MAX_UPDATE_ATTEMPTS"
+        if [ $UPDATE_ATTEMPT -eq $MAX_UPDATE_ATTEMPTS ]; then
+            echo "Software sources update failed after $MAX_UPDATE_ATTEMPTS attempts"
+            # Output system information for diagnosis
+            df -h
+            free -h
+            exit 1
+        fi
+        sleep 10
+    fi
+done
 
-# Install only absolutely necessary packages with better error handling
+# Install only absolutely necessary packages with better error handling and retry mechanism
 echo "Installing absolutely necessary dependencies..."
-MAX_RETRIES=3
-RETRY_COUNT=0
+MAX_INSTALL_ATTEMPTS=3
+INSTALL_ATTEMPT=0
 
-while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+while [ $INSTALL_ATTEMPT -lt $MAX_INSTALL_ATTEMPTS ]; do
     if sudo apt-get -qq install -y \
         build-essential clang flex bison g++ gawk \
         gcc-multilib g++-multilib \
@@ -42,34 +72,54 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         echo "Dependencies installed successfully"
         break
     else
-        RETRY_COUNT=$((RETRY_COUNT + 1))
-        echo "Installation failed, retrying... ($RETRY_COUNT/$MAX_RETRIES)"
-        sleep 5
+        INSTALL_ATTEMPT=$((INSTALL_ATTEMPT + 1))
+        echo "Installation failed, retrying... ($INSTALL_ATTEMPT/$MAX_INSTALL_ATTEMPTS)"
+        if [ $INSTALL_ATTEMPT -eq $MAX_INSTALL_ATTEMPTS ]; then
+            echo "Failed to install dependencies after $MAX_INSTALL_ATTEMPTS attempts"
+            # Output system information for diagnosis
+            df -h
+            free -h
+            # List what packages are available
+            echo "Available packages:"
+            apt-cache search build-essential || echo "Cannot search packages"
+            exit 1
+        fi
+        sleep 10
         sudo apt-get -qq update
     fi
 done
-
-if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-    echo "Failed to install dependencies after $MAX_RETRIES attempts"
-    # Output system information for diagnosis
-    df -h
-    free -h
-    exit 1
-fi
 
 # Verify essential tools are available
 echo "Verifying essential tools..."
 for tool in git wget curl; do
     if ! command -v $tool >/dev/null 2>&1; then
         echo "Essential tool $tool not found"
-        exit 1
+        # Try to install the missing tool
+        if sudo apt-get -qq install -y $tool; then
+            echo "Successfully installed $tool"
+        else
+            echo "Failed to install $tool"
+            exit 1
+        fi
+    else
+        echo "✅ $tool is available"
     fi
 done
 
-# Minimal ccache setup
+# Enhanced ccache setup with error handling
 echo "Setting up ccache..."
-ccache -M 4G 2>/dev/null || echo "ccache setup optional, skipping"
-ccache -z 2>/dev/null || echo "ccache zeroing optional, skipping"
+if command -v ccache >/dev/null 2>&1; then
+    ccache -M 4G 2>/dev/null || echo "ccache setup optional, skipping"
+    ccache -z 2>/dev/null || echo "ccache zeroing optional, skipping"
+else
+    echo "ccache not available, installing..."
+    if sudo apt-get -qq install -y ccache; then
+        ccache -M 4G 2>/dev/null || echo "ccache setup optional, skipping"
+        ccache -z 2>/dev/null || echo "ccache zeroing optional, skipping"
+    else
+        echo "Failed to install ccache, continuing without it"
+    fi
+fi
 
 echo "=== Minimal Environment Setup Completed ==="
 echo "Final disk status:"

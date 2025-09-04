@@ -44,7 +44,6 @@ REQUIRED_DIRS=(
     "files/etc"
     "files/etc/config"
     "tools"
-    "patches"
 )
 
 # 检查目录
