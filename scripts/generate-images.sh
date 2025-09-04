@@ -94,12 +94,40 @@ echo "Setting loop device..."
 MAX_RETRIES=5
 RETRY_COUNT=0
 
-# Clean up any existing loop devices
-echo "Cleaning up existing loop devices..."
-sudo losetup --reset 2>/dev/null || true
+# Enhanced cleanup function for loop devices
+cleanup_loops() {
+    echo "Cleaning up loop devices..."
+    # First try to unmount any mounted partitions
+    for mount_point in "$WORK_DIR/boot_mnt" "$WORK_DIR/root_mnt"; do
+        if mountpoint -q "$mount_point" 2>/dev/null; then
+            echo "Unmounting $mount_point..."
+            sudo umount "$mount_point" 2>/dev/null || {
+                echo "Warning: Failed to unmount $mount_point"
+                sudo umount -f "$mount_point" 2>/dev/null || true
+            }
+        fi
+    done
+    
+    # Reset all loop devices
+    echo "Resetting loop devices..."
+    sudo losetup --reset 2>/dev/null || true
+    
+    # Wait a moment for devices to be released
+    sleep 2
+    
+    # Forcefully delete any remaining loop devices
+    for loop_dev in $(losetup -a 2>/dev/null | grep -o '/dev/loop[0-9]*'); do
+        echo "Detaching $loop_dev..."
+        sudo losetup -d "$loop_dev" 2>/dev/null || true
+    done
+}
+
+# Clean up any existing loop devices before starting
+cleanup_loops
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     LOOP_DEV=""
+    # Try to find an available loop device
     LOOP_DEV=$(sudo losetup --find --show --partscan "$IMG_FILE" 2>/dev/null) || LOOP_DEV=""
     if [ -n "$LOOP_DEV" ] && [ -b "$LOOP_DEV" ]; then
         echo "Successfully set loop device: $LOOP_DEV"
@@ -116,10 +144,13 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             ls -la "$IMG_FILE" 2>/dev/null || echo "Image file not found"
             echo "Loop devices status:"
             losetup -a 2>/dev/null || echo "Cannot get loop device status"
+            echo "Available loop devices:"
+            ls -la /dev/loop* 2>/dev/null || echo "No loop devices found"
             exit 1
         fi
         sleep 3
-        sudo losetup --reset 2>/dev/null || true
+        # Clean up before retrying
+        cleanup_loops
     fi
 done
 

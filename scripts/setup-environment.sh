@@ -31,6 +31,31 @@ while [ $PING_ATTEMPT -lt $MAX_PING_ATTEMPTS ]; do
     fi
 done
 
+# Enhanced disk space check - Check if we have at least 20GB free space
+echo "Checking disk space..."
+AVAILABLE_SPACE_KB=$(df . | awk 'NR==2 {print $4}')
+AVAILABLE_SPACE_GB=$((AVAILABLE_SPACE_KB / 1024 / 1024))
+REQUIRED_SPACE_GB=20
+
+if [ $AVAILABLE_SPACE_GB -lt $REQUIRED_SPACE_GB ]; then
+    echo "⚠️  Insufficient disk space: ${AVAILABLE_SPACE_GB}GB available, at least ${REQUIRED_SPACE_GB}GB required"
+    echo "Attempting to free up space..."
+    # Try to clean up some space
+    sudo apt-get clean || echo "Warning: Could not clean apt cache"
+    sudo rm -rf /var/log/*.log 2>/dev/null || echo "Warning: Could not clean log files"
+    # Recheck space after cleanup
+    AVAILABLE_SPACE_KB=$(df . | awk 'NR==2 {print $4}')
+    AVAILABLE_SPACE_GB=$((AVAILABLE_SPACE_KB / 1024 / 1024))
+    if [ $AVAILABLE_SPACE_GB -lt $REQUIRED_SPACE_GB ]; then
+        echo "❌ Still insufficient disk space after cleanup: ${AVAILABLE_SPACE_GB}GB available"
+        exit 1
+    else
+        echo "✅ Disk space after cleanup: ${AVAILABLE_SPACE_GB}GB"
+    fi
+else
+    echo "✅ Sufficient disk space: ${AVAILABLE_SPACE_GB}GB available"
+fi
+
 # Skip cleanup operations to save time
 echo "Skipping cleanup operations, installing dependencies directly..."
 

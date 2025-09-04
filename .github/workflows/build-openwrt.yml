@@ -199,14 +199,14 @@ jobs:
         echo "开始编译固件..."
         COMPILE_START_TIME=$(date +%s)
         
-        # 使用详细输出模式进行编译，便于调试
+        # 增强的编译过程监控
         if ! make -j$(nproc) V=s 2>&1 | tee build.log; then
           echo "❌ 编译失败，启用详细日志..."
           echo "status=failed" >> $GITHUB_OUTPUT
           
-          # 输出最后100行日志
-          echo "=== 最后100行编译日志 ==="
-          tail -100 build.log || echo "无法读取日志文件"
+          # 输出最后200行日志而不是100行
+          echo "=== 最后200行编译日志 ==="
+          tail -200 build.log || echo "无法读取日志文件"
           echo "========================"
           
           # 输出资源使用情况
@@ -216,6 +216,19 @@ jobs:
           echo "内存使用情况:"
           free -h
           echo "=================="
+          
+          # 输出系统负载信息
+          echo "=== 系统负载信息 ==="
+          uptime
+          echo "CPU使用情况:"
+          top -bn1 | head -20
+          echo "=================="
+          
+          # 检查是否有足够的内存
+          MEM_AVAILABLE=$(free -m | awk '/^Mem:/{print $7}')
+          if [ "$MEM_AVAILABLE" -lt 1000 ]; then
+            echo "⚠️  内存不足: ${MEM_AVAILABLE}MB available"
+          fi
           
           exit 1
         fi
@@ -411,6 +424,16 @@ jobs:
         else
           echo "❌ 依赖包下载异常"
         fi
+        
+        # 检查是否有足够的磁盘空间
+        echo ""
+        echo "磁盘空间检查:"
+        df -h .
+        
+        # 检查是否有足够的内存
+        echo ""
+        echo "内存检查:"
+        free -h
         
         echo "========================="
 
