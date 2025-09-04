@@ -374,7 +374,7 @@ jobs:
         prerelease: false
 
     - name: 清理工作流运行记录
-      uses: Mattraks/delete-workflow-runs@v2
+      uses: Mattraks/delete-workflow-runs@v2.1.0
       with:
         token: ${{ github.token }}
         repository: ${{ github.repository }}
@@ -382,7 +382,7 @@ jobs:
         keep_minimum_runs: 3
 
     - name: 删除旧的Releases
-      uses: dev-drprasad/delete-older-releases@v0.3.2
+      uses: dev-drprasad/delete-older-releases@v0.3.4
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       with:
         keep_latest: 5

@@ -93,7 +93,8 @@ while [ $INSTALL_ATTEMPT -lt $MAX_INSTALL_ATTEMPTS ]; do
         git wget curl time file unzip rsync swig \
         libncurses5-dev libssl-dev zlib1g-dev \
         python3 python3-dev python3-distutils python3-setuptools \
-        gettext xsltproc; then
+        gettext xsltproc \
+        libelf-dev libdw-dev; then  # 添加缺失的依赖包
         echo "Dependencies installed successfully"
         break
     else
