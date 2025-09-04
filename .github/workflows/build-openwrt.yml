@@ -52,7 +52,7 @@ jobs:
     - name: 初始化构建环境
       env:
         DEBIAN_FRONTEND: noninteractive
-      timeout-minutes: 10  # 增加超时时间到10分钟
+      timeout-minutes: 15  # 增加超时时间到15分钟
       run: |
         # 设置时区
         sudo timedatectl set-timezone "$TZ"
@@ -63,10 +63,14 @@ jobs:
         echo "- CPU核心: $(nproc)"
         echo "- 内存: $(free -h | grep Mem | awk '{print $2}')"
         
+        # 检查磁盘空间
+        echo "磁盘使用情况:"
+        df -h
+        
         # 执行环境准备脚本（超级强化错误处理）
         chmod +x $SETUP_ENV_SH
         echo "开始执行环境准备脚本..."
-        if ! timeout 8m bash -x $GITHUB_WORKSPACE/$SETUP_ENV_SH; then
+        if ! timeout 10m bash -x $GITHUB_WORKSPACE/$SETUP_ENV_SH; then
           echo "❌ 环境准备失败！详细错误信息："
           echo "磁盘使用情况:"
           df -h
@@ -160,10 +164,17 @@ jobs:
 
     - name: 编译固件
       id: compile
-      timeout-minutes: 240  # 增加超时时间为4小时
+      timeout-minutes: 300  # 增加超时时间为5小时
       run: |
         cd openwrt
         echo -e "使用 $(nproc) 线程编译"
+        
+        # 检查磁盘空间
+        AVAILABLE_SPACE=$(df . | awk 'NR==2 {print $4}')
+        if [ $AVAILABLE_SPACE -lt 10485760 ]; then  # 10GB
+            echo "Insufficient disk space: ${AVAILABLE_SPACE}K available"
+            exit 1
+        fi
         
         # 编译前调试信息
         if [ "${{ github.event.inputs.debug }}" == "true" ]; then

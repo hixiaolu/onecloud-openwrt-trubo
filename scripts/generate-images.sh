@@ -14,7 +14,8 @@ WORK_DIR=$(pwd)
 TOOLS_DIR="$WORK_DIR/tools"
 BUILD_DATE=$(date +"%Y%m%d%H%M")
 
-# Check required tools
+# Check required tools and files
+echo "Checking required tools and files..."
 if [ ! -f "$TOOLS_DIR/AmlImg" ]; then
     echo "Error: AmlImg tool not found"
     exit 1
@@ -65,6 +66,9 @@ echo "Setting loop device..."
 MAX_RETRIES=3
 RETRY_COUNT=0
 
+# Clean up any existing loop devices
+sudo losetup --reset 2>/dev/null || true
+
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     LOOP_DEV=$(sudo losetup --find --show --partscan "$IMG_FILE" 2>/dev/null) || LOOP_DEV=""
     if [ -n "$LOOP_DEV" ] && [ -b "$LOOP_DEV" ]; then
@@ -80,6 +84,9 @@ done
 
 if [ $RETRY_COUNT -eq $MAX_RETRIES ] || [ -z "$LOOP_DEV" ] || [ ! -b "$LOOP_DEV" ]; then
     echo "Error: Unable to set loop device after $MAX_RETRIES attempts"
+    # Output diagnostic information
+    df -h
+    ls -la "$IMG_FILE" 2>/dev/null || echo "Image file not found"
     exit 1
 fi
 

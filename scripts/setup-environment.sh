@@ -12,6 +12,13 @@ echo "=== Starting Minimal Environment Setup ==="
 echo "Initial disk status:"
 df -h
 
+# Check network connectivity
+echo "Checking network connectivity..."
+if ! ping -c 3 8.8.8.8 >/dev/null 2>&1; then
+    echo "Network connection failed"
+    exit 1
+fi
+
 # Skip cleanup operations to save time
 echo "Skipping cleanup operations, installing dependencies directly..."
 
@@ -44,8 +51,20 @@ done
 
 if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
     echo "Failed to install dependencies after $MAX_RETRIES attempts"
+    # Output system information for diagnosis
+    df -h
+    free -h
     exit 1
 fi
+
+# Verify essential tools are available
+echo "Verifying essential tools..."
+for tool in git wget curl; do
+    if ! command -v $tool >/dev/null 2>&1; then
+        echo "Essential tool $tool not found"
+        exit 1
+    fi
+done
 
 # Minimal ccache setup
 echo "Setting up ccache..."

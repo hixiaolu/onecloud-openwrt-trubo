@@ -1,8 +1,8 @@
 # 玩客云纯净版OpenWrt固件
 
-![GitHub](https://img.shields.io/github/license/your-username/onecloud-openwrt-pure)
-![GitHub release (latest by date)](https://img.shields.io/github/v/release/your-username/onecloud-openwrt-pure)
-![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/your-username/onecloud-openwrt-pure/build-openwrt.yml)
+![GitHub](https://img.shields.io/github/license/hixiaolu/onecloud-openwrt-trubo)
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/hixiaolu/onecloud-openwrt-trubo)
+![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/hixiaolu/onecloud-openwrt-trubo/build-openwrt.yml)
 
 ## 项目简介
 
@@ -52,7 +52,7 @@
 ## 项目结构
 
 ```
-onecloud-openwrt-main/
+onecloud-openwrt-trubo/
 ├── .github/workflows/
 │   ├── build-openwrt.yml      # 主构建工作流
 │   ├── cleanup.yml            # 清理工作流
@@ -82,8 +82,8 @@ onecloud-openwrt-main/
 
 1. 克隆本项目：
    ```bash
-   git clone https://github.com/your-username/onecloud-openwrt-pure.git
-   cd onecloud-openwrt-pure
+   git clone https://github.com/hixiaolu/onecloud-openwrt-trubo.git
+   cd onecloud-openwrt-trubo
    ```
 
 2. 运行验证脚本：
@@ -95,9 +95,9 @@ onecloud-openwrt-main/
 
 ### 自定义配置
 
-- 修改[onecloud.config](file:///g:/onecloud-openwrt-main/configs/onecloud.config)文件来自定义固件组件
-- 修改[feeds.conf.default](file:///g:/onecloud-openwrt-main/configs/feeds.conf.default)文件来自定义源
-- 修改[scripts/](file:///g:/onecloud-openwrt-main/scripts/)目录下的脚本来自定义构建过程
+- 修改[onecloud.config](configs/onecloud.config)文件来自定义固件组件
+- 修改[feeds.conf.default](configs/feeds.conf.default)文件来自定义源
+- 修改[scripts/](scripts/)目录下的脚本来自定义构建过程
 
 ## 贡献
 
