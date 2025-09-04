@@ -292,6 +292,18 @@ sudo umount "$WORK_DIR/root_mnt" || {
 
 # Generate sparse images with better error handling
 echo "Generating sparse images..."
+# Check if img2simg tool is available
+if ! command -v img2simg >/dev/null 2>&1; then
+    echo "Error: img2simg tool not found"
+    echo "Attempting to install android-tools-fsutils..."
+    if sudo apt-get update && sudo apt-get install -y android-tools-fsutils; then
+        echo "Successfully installed android-tools-fsutils"
+    else
+        echo "Error: Failed to install android-tools-fsutils"
+        exit 1
+    fi
+fi
+
 if ! sudo img2simg "${LOOP_DEV}p1" "$BURN_DIR/boot.simg" 2>/dev/null; then
     echo "Error: Failed to generate boot sparse image"
     echo "Checking source file:"
